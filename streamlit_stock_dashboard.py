@@ -1,9 +1,6 @@
 # streamlit_stock_dashboard.py
-# A self-contained Streamlit app that:
-# - Lets you add a watchlist of stocks (default 30 major stocks)
-# - Click/select a stock to view indicators (Market Cap, Volume, RSI, MACD, SMA)
-# - Produces a buy/sell recommendation based on a simple rule-based algorithm
-# - Estimates tentative holding-period (days) to reach target profits using Monte Carlo
+# Streamlit Stock Dashboard with grouped watchlist (Big/Medium/Small Cap)
+# and improved display formatting.
 
 import streamlit as st
 import pandas as pd
@@ -28,10 +25,8 @@ def get_data(ticker, period='1y', interval='1d'):
 
 def calc_indicators(df):
     df = df.copy()
-    # SMA
     df['SMA20'] = df['Close'].rolling(20).mean()
     df['SMA50'] = df['Close'].rolling(50).mean()
-    # RSI (14)
     delta = df['Close'].diff()
     up = delta.clip(lower=0)
     down = -1 * delta.clip(upper=0)
@@ -39,7 +34,6 @@ def calc_indicators(df):
     ma_down = down.ewm(com=13, adjust=False).mean()
     rs = ma_up / ma_down
     df['RSI'] = 100 - (100 / (1 + rs))
-    # MACD
     ema12 = df['Close'].ewm(span=12, adjust=False).mean()
     ema26 = df['Close'].ewm(span=26, adjust=False).mean()
     df['MACD'] = ema12 - ema26
@@ -109,7 +103,19 @@ def estimate_days_to_target(df, current_price, target_return, sims=5000, max_day
 
 st.title('Stock Watch + Indicator Dashboard')
 
-default_tickers = 'AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA, JPM, JNJ, V, PG, UNH, XOM, MA, HD, PFE, BAC, KO, DIS, NFLX, CSCO, ADBE, INTC, T, WMT, CRM, NKE, MCD, ORCL, AMD'
+# Static groups of example tickers
+big_cap = 'AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA, JPM, JNJ, V'
+medium_cap = 'ADBE, AMD, LULU, SQ, SNOW, PYPL, RIVN, DOCU, DASH, ZM'
+small_cap = 'PLTR, SOFI, DKNG, CGC, WISH, HOOD, NNDM, RKT, BB, GPRO'
+
+group_selection = st.sidebar.radio('Select Market Cap Group', ['Big Cap (>$10B)', 'Medium Cap ($1B–$10B)', 'Small Cap (<$1B)'])
+
+if group_selection.startswith('Big'):
+    default_tickers = big_cap
+elif group_selection.startswith('Medium'):
+    default_tickers = medium_cap
+else:
+    default_tickers = small_cap
 
 with st.sidebar:
     st.header('Watchlist')
@@ -140,11 +146,21 @@ with col2:
         st.stop()
     df = calc_indicators(hist)
     latest = df.iloc[-1]
-    c1, c2, c3 = st.columns(3)
-    c1.metric('Price', f"{latest['Close']:.2f}")
-    c2.metric('Volume', int(latest['Volume']))
+
+    price = f"${latest['Close']:.2f}"
+    volume_m = latest['Volume'] / 1_000_000
+    vol_str = f"{volume_m:.2f}M pcs"
     market_cap = info.get('marketCap', None)
-    c3.metric('Market Cap', f"{market_cap:,}" if market_cap else 'N/A')
+    if market_cap:
+        market_cap_m = market_cap / 1_000_000
+        mc_str = f"${market_cap_m:,.0f}M"
+    else:
+        mc_str = 'N/A'
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric('Price', price)
+    c2.metric('Volume', vol_str)
+    c3.metric('Market Cap', mc_str)
 
 st.markdown('---')
 
@@ -174,20 +190,26 @@ results = []
 current_price = latest['Close']
 for t in targets:
     res = estimate_days_to_target(df, current_price, target_return=t, sims=2000, max_days=365)
-    results.append({'target_pct': int(t*100), 'prob_reach_1y': round(res['probability']*100,2), 'median_days': res['median_days'], '90pct_days': res['90pct_days']})
+    results.append({
+        'Target (%)': int(t*100),
+        'Prob. to reach target within 1 year (%)': round(res['probability']*100,2),
+        'Median Days': res['median_days'],
+        '90th Percentile Days': res['90pct_days']
+    })
 
 st.table(pd.DataFrame(results))
 
 st.markdown('---')
 
 st.write('Notes and limitations:')
-st.write('- This app uses a simple rule-based signal engine and Monte Carlo with historical daily returns to estimate time-to-targets. These are probabilistic estimates, not guarantees.')
+st.write('- Prices are shown in USD ($), Volume in millions of pieces, Market Cap in millions of USD.')
+st.write('- The app uses a simple rule-based signal engine and Monte Carlo with historical daily returns to estimate time-to-targets. These are probabilistic estimates, not guarantees.')
 st.write('- Tune algorithm thresholds (RSI levels, MACD logic) and simulation settings for your risk profile.')
 
 st.write('To run:')
 st.code("""
 # Install dependencies
-pip install streamlit yfinance
+pip install streamlit yfinance pandas numpy
 # Run
 streamlit run streamlit_stock_dashboard.py
 """)
