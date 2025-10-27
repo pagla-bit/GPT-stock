@@ -4,3 +4,5 @@ pandas
 numpy
 requests
 plotly
+vaderSentiment
+nltk
