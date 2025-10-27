@@ -1,6 +1,6 @@
 # streamlit_stock_dashboard.py
 # A self-contained Streamlit app that:
-# - Lets you add a watchlist of stocks
+# - Lets you add a watchlist of stocks (default 30 major stocks)
 # - Click/select a stock to view indicators (Market Cap, Volume, RSI, MACD, SMA)
 # - Produces a buy/sell recommendation based on a simple rule-based algorithm
 # - Estimates tentative holding-period (days) to reach target profits using Monte Carlo
@@ -48,35 +48,29 @@ def calc_indicators(df):
 
 
 def rule_based_signal(df):
-    # Uses latest values to create a simple recommendation
     latest = df.iloc[-1]
     prev = df.iloc[-2]
     signals = []
 
-    # RSI rules
     if latest['RSI'] < 30:
         signals.append('RSI oversold -> BUY')
     elif latest['RSI'] > 70:
         signals.append('RSI overbought -> SELL')
 
-    # MACD crossover
     if (prev['MACD'] < prev['MACD_signal']) and (latest['MACD'] > latest['MACD_signal']):
         signals.append('MACD bullish crossover -> BUY')
     elif (prev['MACD'] > prev['MACD_signal']) and (latest['MACD'] < latest['MACD_signal']):
         signals.append('MACD bearish crossover -> SELL')
 
-    # Price vs SMA
     if latest['Close'] > latest['SMA50']:
         signals.append('Price above 50-day SMA -> BULLISH')
     else:
         signals.append('Price below 50-day SMA -> BEARISH')
 
-    # Volume spike
     vol_avg20 = df['Volume'].rolling(20).mean().iloc[-1]
     if latest['Volume'] > 1.5 * vol_avg20:
         signals.append('Volume spike -> CONFIRMS recent move')
 
-    # Final simple recommendation logic
     buy_votes = sum(1 for s in signals if 'BUY' in s or 'BULLISH' in s)
     sell_votes = sum(1 for s in signals if 'SELL' in s or 'BEARISH' in s)
     if buy_votes > sell_votes:
@@ -90,26 +84,21 @@ def rule_based_signal(df):
 
 
 def estimate_days_to_target(df, current_price, target_return, sims=5000, max_days=365):
-    # Calibrate GBM from recent daily returns
     returns = df['Close'].pct_change().dropna()
     mu = returns.mean()
     sigma = returns.std()
 
-    # Simulate many paths of daily returns
     days_to_target = []
     for _ in range(sims):
         price = current_price
         for day in range(1, max_days+1):
-            # draw daily return from normal with mu and sigma
             r = np.random.normal(loc=mu, scale=sigma)
             price *= (1 + r)
             if (price / current_price - 1) >= target_return:
                 days_to_target.append(day)
                 break
         else:
-            # didn't reach target within max_days
             days_to_target.append(np.nan)
-    # summarize
     days_arr = np.array(days_to_target, dtype=float)
     prob_reach = np.sum(~np.isnan(days_arr)) / sims
     median_days = np.nanmedian(days_arr)
@@ -120,9 +109,11 @@ def estimate_days_to_target(df, current_price, target_return, sims=5000, max_day
 
 st.title('Stock Watch + Indicator Dashboard')
 
+default_tickers = 'AAPL, MSFT, GOOGL, AMZN, META, NVDA, TSLA, JPM, JNJ, V, PG, UNH, XOM, MA, HD, PFE, BAC, KO, DIS, NFLX, CSCO, ADBE, INTC, T, WMT, CRM, NKE, MCD, ORCL, AMD'
+
 with st.sidebar:
     st.header('Watchlist')
-    tickers_input = st.text_area('Enter tickers (comma separated)', value='AAPL, MSFT, GOOGL')
+    tickers_input = st.text_area('Enter tickers (comma separated)', value=default_tickers)
     tickers = [t.strip().upper() for t in tickers_input.split(',') if t.strip()]
     st.markdown('---')
     st.header('Settings')
@@ -130,12 +121,10 @@ with st.sidebar:
     interval = st.selectbox('Data interval', options=['1d','1wk'], index=0)
     run_button = st.button('Refresh data')
 
-# quick guard
 if not tickers:
     st.info('Add some tickers in the left sidebar to start.')
     st.stop()
 
-# main layout
 col1, col2 = st.columns([1,2])
 
 with col1:
@@ -159,7 +148,6 @@ with col2:
 
 st.markdown('---')
 
-# Charts and indicators
 st.subheader('Price chart & Indicators')
 price_col, ind_col = st.columns([3,1])
 with price_col:
@@ -174,7 +162,6 @@ with ind_col:
 
 st.markdown('---')
 
-# Recommendation + holding period estimates
 st.subheader('Recommendation & Estimated holding periods')
 recommendation, signals = rule_based_signal(df)
 st.write('Algorithmic signals:')
@@ -182,7 +169,7 @@ for s in signals:
     st.write('- ' + s)
 st.success(f'Recommendation: {recommendation}')
 
-targets = [0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 1.00]  # 5% to 100%
+targets = [0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 1.00]
 results = []
 current_price = latest['Close']
 for t in targets:
@@ -194,19 +181,13 @@ st.table(pd.DataFrame(results))
 st.markdown('---')
 
 st.write('Notes and limitations:')
-st.write('- This app uses a simple rule-based signal engine and Monte Carlo with historical daily returns to estimate time-to-targets. These are **probabilistic estimates**, not guarantees.')
+st.write('- This app uses a simple rule-based signal engine and Monte Carlo with historical daily returns to estimate time-to-targets. These are probabilistic estimates, not guarantees.')
 st.write('- Tune algorithm thresholds (RSI levels, MACD logic) and simulation settings for your risk profile.')
 
 st.write('To run:')
 st.code("""
 # Install dependencies
 pip install streamlit yfinance
-# optional: pip install pandas_ta
 # Run
 streamlit run streamlit_stock_dashboard.py
 """)
-
-st.write('If you want, I can:')
-st.write('- Convert this into a full backtest to compute historical accuracy of signals')
-st.write('- Add more indicators (ATR, Bollinger Bands, OBV, Fundamental ratios)')
-st.write('- Prepare a deployment guide (Streamlit Community Cloud, Heroku alternatives)')
